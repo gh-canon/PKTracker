@@ -1,0 +1,6 @@
+## Author: canon
+## Interface: 30000
+## SavedVariablesPerCharacter: history, info, settings
+## Title: PKTracker
+## Version: 0.0.0.26
+core.lua
