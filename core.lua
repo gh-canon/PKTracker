@@ -1,7 +1,7 @@
 ﻿-- Author      : canon
 -- Create Date : 7/25/2013 9:51:02 PM
 
-local version = "0.0.0.26"
+local version = "0.0.0.27"
 local frame = CreateFrame("BUTTON", "PKTracker");
 local events = {};
 local genders = { "unknown", "Male", "Female" };
@@ -720,24 +720,14 @@ events.PLAYER_LEAVE_COMBAT = function(...)
    
 end
 
-events.COMBAT_LOG_EVENT_UNFILTERED = function (...)
+events.COMBAT_LOG_EVENT_UNFILTERED = function (timestamp, event, hideCaster, sourceGUID, sourceName, sourceFlags, sourceFlags2, destGUID, destName, destFlags, destFlags2,	...)
    
-	local timestamp, 
-	event, 
-	hideCaster, 
-	sourceGUID, 
-	sourceName, 
-	sourceFlags, 
-	sourceFlags2, 
-	destGUID, 
-	destName, 
-	destFlags, 
-	destFlags2,	
-	spellId,	
+	local spellId,	
 	spellName,
 	spellSchool,
 	amount,
-	overkill = ...
+	overkill,
+	environmentalDamageType
 		
 	if not destFlags or not IsHostilePlayer(destFlags) then
 		return	
@@ -800,7 +790,7 @@ events.COMBAT_LOG_EVENT_UNFILTERED = function (...)
 	elseif event == "PARTY_KILL" then			
 		
 		if settings.debugging then
-			AddDebugChatMessage(string.format("event: %s, sourceName: %s, spellId: %s, spellName: %s", nvl(event,"nil"), nvl(sourceName,"nil"), nvl(spellId,"nil"), nvl(spellName, "nil")))
+			AddDebugChatMessage(string.format("event: %s, sourceName: %s, destName: %s", nvl(event,"nil"), nvl(sourceName,"nil"), nvl(destName,"nil")))
 		end
 		
 		if not combatant then
@@ -820,14 +810,14 @@ events.COMBAT_LOG_EVENT_UNFILTERED = function (...)
 	elseif damageEvents[event] then
 	
 		if event == "SWING_DAMAGE" then
-			overkill = select(11, ...)		
+			amount, overkill = ...			
 			spellId = -1			
 			spellName = "melee attack"
 		elseif event == "ENVIRONMENTAL_DAMAGE" then
-			spellName,
-			amount,
-			overkill = select(10, ...)			
-			spellId = damageTypeMapping[spellName]			
+			environmentalDamageType, amount, overkill = ...
+			spellId = damageTypeMapping[environmentalDamageType]			
+		else 
+			spellId, spellName, spellSchool, amount, overkill = ...
 		end
 	
 		if (combatant or sourceGUID == playerGUID or teammates[sourceGUID]) then
@@ -847,7 +837,7 @@ events.COMBAT_LOG_EVENT_UNFILTERED = function (...)
 						
 			end
 			
-			combatant.Dead = overkill and overkill > 0
+			combatant.Dead = combatant.Dead or (overkill and overkill > 0)
 			combatant.AttackerGUID = sourceGUID
 			combatant.AttackerName = sourceName					
 			combatant.SpellID = spellId	
@@ -860,23 +850,18 @@ events.COMBAT_LOG_EVENT_UNFILTERED = function (...)
 		
 			-- Add unit GUID to combatants
 			combatants[destGUID] = {
-				GUID = destGUID
+				GUID = destGUID,
+				Dead = overkill and overkill > 0,
+				AttackerGUID = sourceGUID,
+				AttackerName = sourceName,					
+				SpellID = spellId					
 			}
 		
 		end
 		
-	elseif event == "SPELL_CAST_SUCCESS" then
-	
-		-- feign death
-		if spellId == 5384 then
-		
-			if settings.debugging then
-				AddDebugChatMessage(string.format("event: %s, sourceName: %s, spellId: %s, spellName: %s", nvl(event,"nil"), nvl(sourceName,"nil"), nvl(spellId,"nil"), nvl(spellName, "nil")))
-			end		
-		
-		end
-		
 	elseif event == "SPELL_HEAL" and combatant then
+			
+		spellId, spellName, spellSchool, amount = ...			
 			
 		-- priest Spirit of Redemption			
 		if spellId == 27827 then
@@ -889,6 +874,8 @@ events.COMBAT_LOG_EVENT_UNFILTERED = function (...)
 		end		
 	
 	elseif event == "SPELL_INSTAKILL" and combatant then
+	
+		spellId, spellName, spellSchool = ...	
 	
 		-- stupid purgatory...		
 						
