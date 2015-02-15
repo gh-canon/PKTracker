@@ -1,7 +1,7 @@
 ﻿-- Author      : canon
 -- Create Date : 7/25/2013 9:51:02 PM
 
-local version = "0.0.0.27"
+local version = "0.0.0.28"
 local frame = CreateFrame("BUTTON", "PKTracker");
 local events = {};
 local genders = { "unknown", "Male", "Female" };
@@ -69,6 +69,11 @@ local damageTypeMapping = {
 }
 
 local teammates = {}
+
+function math.round(num, idp)
+  local mult = 10^(idp or 0)
+  return math.floor(num * mult + 0.5) / mult
+end
 
 local function getFatalSpellName(spellId)
 	
@@ -186,8 +191,14 @@ local function SendUnitInfoRequest(GUID)
 	
 	end
 		
-	infoRequests[GUID] = time()
+	if not GUID or not playerName then
 	
+		return
+		
+	end
+		
+	infoRequests[GUID] = time()
+		
 	local message = string.format("UNIT_INFO_REQUEST:%s,%s", GUID, playerName)
 				
 	SendAddonMessage("PKTRACKER",message,"RAID");	
@@ -248,6 +259,14 @@ local function WipeInfo()
 		end
 		
 	end
+
+end
+
+local function UpdateSlider()
+
+	frame.Slider:SetMinMaxValues(1, #history - #history % 7);				
+	frame.Slider:SetValueStep(7);
+	frame.Slider:SetValue(currentRecord);	
 
 end
 
@@ -347,10 +366,14 @@ local function UpdateKillFrame(killFrame, kill, n)
 			
 				killFrame.KilledBy:SetText(string.format("Died to %s own %s", iif(kill.Sex == 3, "her", "his"), spellName))				
 			
-			else
+			elseif info[kill.AttackerGUID] then
 			
 				killFrame.KilledBy:SetText(string.format("Died to %s's %s", info[kill.AttackerGUID].Name:gmatch("[^-]+")(), spellName))				
+
+			else
 			
+				killFrame.KilledBy:SetText("Died to Unknown.");			
+				
 			end
 						
 		else			
@@ -370,9 +393,13 @@ local function UpdateKillFrame(killFrame, kill, n)
 			
 				killFrame.KilledBy:SetText("Committed suicide")				
 			
-			else
+			elseif info[kill.AttackerGUID] then
 			
 				killFrame.KilledBy:SetText(string.format("Died to %s", info[kill.AttackerGUID].Name:gmatch("[^-]+")()))				
+				
+			else
+			
+				killFrame.KilledBy:SetText("Died to Unknown.");
 			
 			end
 						
@@ -452,8 +479,8 @@ local function UpdateKillFrames(n, newKill)
 
 	local killFrame, count, nHistory, nMax;
 		
-	nHistory = getn(history);
-	nMax = nHistory - nHistory % 7 + iif(nHistory % 7 == 0, -6, 1);
+	nHistory = #history;
+	nMax = nHistory - nHistory % 7 + iif(nHistory % 7 == 0, -6, 1);		
 			
 	n = nvl(n, nHistory);
 
@@ -524,6 +551,10 @@ local function UpdateKillFrames(n, newKill)
 		frame.Next:Disable();
 	end
 	
+	if frame.Slider:GetValue() ~= currentRecord then
+		frame.Slider:SetValue(currentRecord) 
+	end
+	
 end
 
 local function CreateNavButton(text, clickHandler)
@@ -575,7 +606,7 @@ local function CreateKillFrames()
 	frame:SetPoint(nvl(settings.point,"LEFT"), nvl(settings.relativeTo, "UIParent"), nvl(settings.relativePoint, "LEFT"), nvl(settings["x-offset"], 5), nvl(settings["y-offset"], 0));
 	
 	frame.PageText = frame:CreateFontString("TOP"); 	
-	frame.PageText:SetPoint("TOP", frame, "TOP", 0, -4);							
+	frame.PageText:SetPoint("TOP", frame, "TOP", 0, 6);							
 	frame.PageText:SetFont("Fonts\\ARIALN.TTF", 8, "OUTLINE");	
 	
 	frame.Back = CreateNavButton("Older", function(self, e, ...)
@@ -599,6 +630,18 @@ local function CreateKillFrames()
 		anchor = f;		
 		
 	end	
+		
+	frame.Slider = CreateFrame("Slider", "PKTracker_Slider", frame, "OptionsSliderTemplate");	
+	frame.Slider:SetPoint("TOP", frame, "TOP", 0, 0);
+	frame.Slider:SetWidth(130);
+	frame.Slider:SetValueStep(1);
+	_G["PKTracker_SliderLow"]:SetText("");
+	_G["PKTracker_SliderHigh"]:SetText("");
+	_G["PKTracker_SliderText"]:SetText("");
+	frame.Slider:SetScript("OnValueChanged",  function(self, value) 			    				
+		UpdateKillFrames(value)		
+	end)
+	UpdateSlider()
 	
 end
 
@@ -783,7 +826,8 @@ events.COMBAT_LOG_EVENT_UNFILTERED = function (timestamp, event, hideCaster, sou
 				
 		targetInfo.Keep = true		
 		table.insert(history, kill);		
-		UpdateKillFrames(#history, true);			
+		UpdateKillFrames(#history, true);	
+		UpdateSlider();		
 		
 		combatants[destGUID] = nil			
 	
@@ -893,11 +937,9 @@ events.COMBAT_LOG_EVENT_UNFILTERED = function (timestamp, event, hideCaster, sou
    
 end
 
-events.UNIT_TARGET = function (...)
+events.UNIT_TARGET = function (unitId)
    
-	local target = select(1, ...) .. "target";			
-
-	UpdateUnit(target)	
+	UpdateUnit(unitId .. "target")	
    
 end
 
@@ -950,9 +992,7 @@ end
 
 events.custom = {}
 
-events.custom.UNIT_UPDATE = function (...)
-
-	local unitGUID,	name, realm, class, level, race, sex, guildName, time = ...
+events.custom.UNIT_UPDATE = function (unitGUID,	name, realm, class, level, race, sex, guildName, time)
 
 	if not infoRequests[unitGUID] then
 	
