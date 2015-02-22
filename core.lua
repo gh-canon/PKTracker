@@ -1,7 +1,7 @@
 ﻿-- Author      : canon
 -- Create Date : 7/25/2013 9:51:02 PM
 
-local version = "0.0.0.28"
+local version = "0.0.0.30"
 local frame = CreateFrame("BUTTON", "PKTracker");
 local events = {};
 local genders = { "unknown", "Male", "Female" };
@@ -185,17 +185,11 @@ end
 
 local function SendUnitInfoRequest(GUID)
 
-	if infoRequests[GUID] and time() - infoRequests[GUID] < 10 then
+	if not GUID or not playerName or (infoRequests[GUID] and time() - infoRequests[GUID] < 10) then
 	
 		return
 	
-	end
-		
-	if not GUID or not playerName then
-	
-		return
-		
-	end
+	end		
 		
 	infoRequests[GUID] = time()
 		
@@ -242,7 +236,7 @@ end
 
 local function IsHostilePlayer(flags)
 
-	return bit.band(flags, COMBATLOG_OBJECT_TYPE_PLAYER) > 0 and bit.band(flags, COMBATLOG_OBJECT_REACTION_HOSTILE) > 0;
+	return flags and bit.band(flags, COMBATLOG_OBJECT_TYPE_PLAYER) ~= 0 and bit.band(flags, COMBATLOG_OBJECT_REACTION_HOSTILE) ~= 0;
 
 end
 
@@ -264,7 +258,8 @@ end
 
 local function UpdateSlider()
 
-	frame.Slider:SetMinMaxValues(1, #history - #history % 7);				
+	local max = #history - #history % 7;
+	frame.Slider:SetMinMaxValues(1, iif(max < 1, 1, max));				
 	frame.Slider:SetValueStep(7);
 	frame.Slider:SetValue(currentRecord);	
 
@@ -301,7 +296,7 @@ local function UpdateKillFrame(killFrame, kill, n)
 			killFrame.PlayerGuild:SetAlpha(.5)
 		end			
 				
-		killFrame.PlayerLevel:SetText(string.format("%s %s %s |cFF%s%s", nvl(nilIf(kill.Level,-1), "??"), nvl(genders[unitInfo.Sex],""), nvl(unitInfo.Race,""), classColors[unitInfo.Class], unitInfo.Class):gsub("%s+", " "));
+		killFrame.PlayerLevel:SetText(string.format("%s %s %s |cFF%s%s", nvl(nilIf(nvl(kill.Level,unitInfo.Level),-1), "??"), nvl(genders[unitInfo.Sex],""), nvl(unitInfo.Race,""), classColors[unitInfo.Class], unitInfo.Class):gsub("%s+", " "));
 		killFrame.PlayerLevel:Show();
 		killFrame.PlayerLevel:SetAlpha(1)
 		
@@ -538,17 +533,21 @@ local function UpdateKillFrames(n, newKill)
 	else
 		frame.PageText:SetText("No PvP Kills recorded.");
 	end
-		
+					
 	if currentRecord > 1 then		
-		frame.Back:Enable();
+		frame.Back:SetButtonState("NORMAL")
+		frame.Back:Enable();		
 	else	
-		frame.Back:Disable();
+		frame.Back:SetButtonState("PUSHED")
+		frame.Back:Disable();		
 	end
 	
 	if currentRecord < nMax and nHistory > 0 then
-		frame.Next:Enable();
+		frame.Next:SetButtonState("NORMAL")
+		frame.Next:Enable();		
 	else
-		frame.Next:Disable();
+		frame.Next:SetButtonState("PUSHED")
+		frame.Next:Disable();		
 	end
 	
 	if frame.Slider:GetValue() ~= currentRecord then
@@ -752,8 +751,12 @@ events.PLAYER_LEAVE_COMBAT = function(...)
 			frame:SetScript("OnUpdate", nil)
 	
 			for key in pairs(combatants) do
-			
+						
 				combatants[key] = nil;
+				
+				if settings.debugging then
+					AddDebugChatMessage(string.format("Removed combatant: %s", key))		
+				end				
 			
 			end
 			
@@ -770,14 +773,18 @@ events.COMBAT_LOG_EVENT_UNFILTERED = function (timestamp, event, hideCaster, sou
 	spellSchool,
 	amount,
 	overkill,
-	environmentalDamageType
-		
-	if not destFlags or not IsHostilePlayer(destFlags) then
-		return	
-	end		
+	environment	
 	
 	local combatant = combatants[destGUID]
+	
+	local isHostilePlayer = IsHostilePlayer(destFlags)
 		
+	if not combatant and not isHostilePlayer then
+	
+		return
+	
+	end			
+	
 	if event == "UNIT_DIED" and combatant and combatant.Dead then			
 			
 		if settings.debugging then
@@ -830,8 +837,12 @@ events.COMBAT_LOG_EVENT_UNFILTERED = function (timestamp, event, hideCaster, sou
 		UpdateSlider();		
 		
 		combatants[destGUID] = nil			
+
+		if settings.debugging then
+			AddDebugChatMessage(string.format("Removed combatant: %s", destGUID))		
+		end					
 	
-	elseif event == "PARTY_KILL" then			
+	elseif event == "PARTY_KILL" and isHostilePlayer then			
 		
 		if settings.debugging then
 			AddDebugChatMessage(string.format("event: %s, sourceName: %s, destName: %s", nvl(event,"nil"), nvl(sourceName,"nil"), nvl(destName,"nil")))
@@ -851,15 +862,15 @@ events.COMBAT_LOG_EVENT_UNFILTERED = function (timestamp, event, hideCaster, sou
 		combatant.AttackerGUID = sourceGUID
 		combatant.AttackerName = sourceName		
 	
-	elseif damageEvents[event] then
+	elseif damageEvents[event] and isHostilePlayer then
 	
 		if event == "SWING_DAMAGE" then
 			amount, overkill = ...			
 			spellId = -1			
 			spellName = "melee attack"
 		elseif event == "ENVIRONMENTAL_DAMAGE" then
-			environmentalDamageType, amount, overkill = ...
-			spellId = damageTypeMapping[environmentalDamageType]			
+			environment, amount, overkill = ...
+			spellId = damageTypeMapping[environment]			
 		else 
 			spellId, spellName, spellSchool, amount, overkill = ...
 		end
@@ -903,18 +914,18 @@ events.COMBAT_LOG_EVENT_UNFILTERED = function (timestamp, event, hideCaster, sou
 		
 		end
 		
-	elseif event == "SPELL_HEAL" and combatant then
+	elseif event == "SPELL_AURA_APPLIED" and combatant then
 			
-		spellId, spellName, spellSchool, amount = ...			
+		spellId, spellName, spellSchool = ...			
 			
+		if settings.debugging then
+			AddDebugChatMessage(string.format("event: SPELL_AURA_APPLIED, spellId: %s, spellName: %s, destName: %s", nvl(spellId,"nil"), nvl(spellName,"nil"), nvl(destName,"nil")))
+		end							
+					
 		-- priest Spirit of Redemption			
-		if spellId == 27827 then
-		
-			if settings.debugging then
-				AddDebugChatMessage(string.format("event: %s, sourceName: %s, spellId: %s, spellName: %s", nvl(event,"nil"), nvl(sourceName,"nil"), nvl(spellId,"nil"), nvl(spellName, "nil")))
-			end		
-		
-			combatant.Dead = true
+		if spellId == 27827 then			
+			combatant.Dead = true			
+			events.COMBAT_LOG_EVENT_UNFILTERED(timestamp, "UNIT_DIED", hideCaster, sourceGUID, sourceName, sourceFlags, sourceFlags2, destGUID, destName, destFlags, destFlags2)						
 		end		
 	
 	elseif event == "SPELL_INSTAKILL" and combatant then
@@ -938,7 +949,7 @@ events.COMBAT_LOG_EVENT_UNFILTERED = function (timestamp, event, hideCaster, sou
 end
 
 events.UNIT_TARGET = function (unitId)
-   
+     
 	UpdateUnit(unitId .. "target")	
    
 end
@@ -975,7 +986,7 @@ local function OnZoneSwapped()
 		frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED");
 		frame:RegisterEvent("UNIT_TARGET");
 		frame:RegisterEvent("PLAYER_ENTER_COMBAT");
-		frame:RegisterEvent("PLAYER_LEAVE_COMBAT");
+		frame:RegisterEvent("PLAYER_LEAVE_COMBAT");		
 	end
 end
 
@@ -1153,7 +1164,7 @@ SlashCmdList.PKTtracker = function(msg, editbox)
 				maxLevelKills = maxLevelKills + 1
 			end
 		end	
-		print(string.format("%d total kills; %d level 100s", #history, maxLevelKills));
+		AddChatMessage(string.format("%d total kills; %d level 100s", #history, maxLevelKills));
 	elseif msg == "resetdata" then		
 		for key in pairs(history) do			
 			history[key] = nil;			
