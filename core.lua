@@ -1,12 +1,13 @@
 ﻿-- Author      : canon
 -- Create Date : 7/25/2013 9:51:02 PM
 
-local version = "0.0.0.30"
+local version = "0.0.0.41"
 local frame = CreateFrame("BUTTON", "PKTracker");
 local events = {};
 local genders = { "unknown", "Male", "Female" };
 local playerGUID;
 local playerName;
+local tooltipSet = false
 local classColors = {
 	["Death Knight"] = "C41F3B",
 	["Druid"] = "FF7D0A",
@@ -167,6 +168,10 @@ local function Split(val, pattern)
 	return values;
 end
 
+local function roundToFirstDecimal(t)
+    return math.round(t*10)*0.1
+end
+
 local function AddDebugChatMessage(text)
 	DEFAULT_CHAT_FRAME:AddMessage("|cFFDFCE40PKTracker |cFF00FF00debugging|cFFFFFFFF: " .. tostring(text));
 end
@@ -242,6 +247,8 @@ end
 
 local function WipeInfo()
 
+	local info = PKTrackerVars.Info
+
 	local now = time();
 	
 	for key, value in pairs(info) do
@@ -258,6 +265,8 @@ end
 
 local function UpdateSlider()
 
+	local history = PKTrackerVars.History
+	
 	local max = #history - #history % 7;
 	frame.Slider:SetMinMaxValues(1, iif(max < 1, 1, max));				
 	frame.Slider:SetValueStep(7);
@@ -266,6 +275,8 @@ local function UpdateSlider()
 end
 
 local function UpdateKillFrame(killFrame, kill, n)		
+	
+	local history, info, settings = PKTrackerVars.History, PKTrackerVars.Info, PKTrackerVars.Settings
 	
 	local unitInfo = nvl(info[kill.GUID],{})
 		
@@ -329,23 +340,32 @@ local function UpdateKillFrame(killFrame, kill, n)
 
 	killFrame.Zone:SetText(kill.Location.Zone);		
 	
-	local killCount = 0
-
-	for i = 1, getn(history) do
-	
-		if history[i].GUID == kill.GUID then
-		
-			killCount = killCount + 1;
-		
-		end
-	
+	if unitInfo.Kills then
+		killFrame.TimesKilled:SetText(string.format("Total kills: %d", unitInfo.Kills));
+	else
+		killFrame.TimesKilled:SetText("|cFFCCCCCCTotal kills: unknown");		
 	end
-	
-	killFrame.TimesKilled:SetText(string.format("Total kills: %d", killCount));
 		
 	local spellName = getFatalSpellName(kill.SpellID)
+	local damageString = ""
+	
+	if kill.Damage then
+		if kill.Damage > 1000 then
+			damageString = string.format("%gk", roundToFirstDecimal(kill.Damage / 1000))
+		elseif kill.Damage < 1000 then
+			damageString = tostring(kill.Damage)
+		end
+	end
 			
 	if spellName then
+	
+		if kill.Tick then
+			spellName = spellName .. ' tick'
+		end
+		
+		if kill.Crit then
+			spellName = 'crit ' .. spellName
+		end
 	
 		if kill.SpellID < -1 then
 		
@@ -353,7 +373,11 @@ local function UpdateKillFrame(killFrame, kill, n)
 	
 		elseif kill.MyKB or kill.AttackerGUID == playerGUID then
 		
-			killFrame.KilledBy:SetText(string.format("Died to my %s", spellName))
+			if kill.Damage then
+				killFrame.KilledBy:SetText(string.format("Died to my %s %s", damageString, spellName))
+			else
+				killFrame.KilledBy:SetText(string.format("Died to my %s", spellName))
+			end
 		
 		elseif kill.AttackerGUID then
 		
@@ -363,7 +387,11 @@ local function UpdateKillFrame(killFrame, kill, n)
 			
 			elseif info[kill.AttackerGUID] then
 			
-				killFrame.KilledBy:SetText(string.format("Died to %s's %s", info[kill.AttackerGUID].Name:gmatch("[^-]+")(), spellName))				
+				if kill.Damage then
+					killFrame.KilledBy:SetText(string.format("Died to %s's %s %s", info[kill.AttackerGUID].Name:gmatch("[^-]+")(), damageString, spellName))									
+				else
+					killFrame.KilledBy:SetText(string.format("Died to %s's %s", info[kill.AttackerGUID].Name:gmatch("[^-]+")(), spellName))				
+				end
 
 			else
 			
@@ -405,6 +433,8 @@ local function UpdateKillFrame(killFrame, kill, n)
 		end	
 	
 	end
+
+	killFrame.KilledBy:SetWidth(204 - killFrame.TimesKilled:GetStringWidth())
 
 end
 
@@ -459,8 +489,11 @@ local function CreateKillFrame(i)
 	killFrame.Zone:SetFont("Fonts\\ARIALN.TTF", 8, "OUTLINE");	
 	
 	killFrame.KilledBy = killFrame.ContentFrame:CreateFontString();
-	killFrame.KilledBy:SetFont("Fonts\\ARIALN.TTF", 8, "OUTLINE");
-	killFrame.KilledBy:SetPoint("BOTTOMLEFT", killFrame.ContentFrame, "BOTTOMLEFT", 0, -10);			
+	killFrame.KilledBy:SetPoint("BOTTOMLEFT", killFrame.ContentFrame, "BOTTOMLEFT", 0, -10);		
+	killFrame.KilledBy:SetFont("Fonts\\ARIALN.TTF", 8, "OUTLINE");	
+	killFrame.KilledBy:SetWordWrap(false) 	
+	killFrame.KilledBy:SetJustifyH("left");	
+	
 	
 	killFrame.TimesKilled = killFrame.ContentFrame:CreateFontString();
 	killFrame.TimesKilled:SetFont("Fonts\\ARIALN.TTF", 8, "OUTLINE");
@@ -471,8 +504,10 @@ local function CreateKillFrame(i)
 end
 
 local function UpdateKillFrames(n, newKill)
-
-	local killFrame, count, nHistory, nMax;
+		
+	local history, info, settings = PKTrackerVars.History, PKTrackerVars.Info, PKTrackerVars.Settings		
+	
+	local killFrame, count, nHistory, nMax;			
 		
 	nHistory = #history;
 	nMax = nHistory - nHistory % 7 + iif(nHistory % 7 == 0, -6, 1);		
@@ -591,6 +626,8 @@ end
 
 local function CreateKillFrames()
 
+	local settings = PKTrackerVars.Settings
+
 	local anchor = frame;				
 	local n = 1;
 
@@ -646,6 +683,8 @@ end
 
 local function UpdateKillFrameUnitInfo(unitInfo)
 
+	local history = PKTrackerVars.History
+
 	for i = currentRecord, math.min(currentRecord + 6, #history) do
 	
 		if history[i] and history[i].GUID == unitInfo.GUID then
@@ -658,6 +697,8 @@ local function UpdateKillFrameUnitInfo(unitInfo)
 end
 
 local function UpdateUnit(unitId)
+
+	local info = PKTrackerVars.Info
 
 	if not UnitExists(unitId) then return end
 	
@@ -690,39 +731,156 @@ local function UpdateUnit(unitId)
 					
 end
 
+local function AggregateKills()
+        
+    AddChatMessage("aggregating kills...")
+    
+    local history, info, settings = PKTrackerVars.History, PKTrackerVars.Info, PKTrackerVars.Settings
+	
+	-- set flag
+	settings.KillsAggregated = true
+		
+	local kill, unitInfo
+	
+	-- wipe out current totals, if any
+	for k,v in pairs(info) do	
+		v.Kills = nil
+	end
+	
+	-- recalculate totals
+	for i = 1, #history do
+	
+		kill = history[i]
+		
+		unitInfo = info[kill.GUID]
+		
+		if unitInfo then
+								
+			if not unitInfo.Kills then
+				
+				unitInfo.Kills = 1				
+				
+			else
+			
+				unitInfo.Kills = unitInfo.Kills + 1
+			
+			end
+		
+		end
+	
+	end
+	
+end
+
+local function InitializeSavedVariables()		
+	
+	if not PKTrackerVars then
+				
+		PKTrackerVars = {}
+
+		-- fix some variable name collisions with other addons, i.e.: history, info, settings
+				
+		if history then
+			--determine if the history variable is ours				
+			local h = history[1]
+			
+			if h and h.GUID and h.Time and h.Location then
+			
+				-- add history to the PKTrackerVars object
+				PKTrackerVars.History = history		
+				-- wipe out the old history object
+				history = nil
+			
+			end				
+		
+		end
+		
+		if not PKTrackerVars.History then
+			
+			PKTrackerVars.History = {}
+			
+		end
+		
+		if info then
+			-- determine if the info variable is ours
+			for k,v in pairs(info) do 					
+				
+				if v and v.GUID and v.Time then
+					
+					-- add info to the PKTrackerVars object
+					PKTrackerVars.Info = info
+					
+					-- wipe out the old history object
+					info = nil
+					
+				end					
+				
+				break
+			end				
+		
+		end
+		
+		if not PKTrackerVars.Info then
+			
+			PKTrackerVars.Info = {}
+			
+		end					
+		
+		if settings then
+		
+			-- determine if the settings variable is ours
+			if settings.KillsAggregated ~= nil then
+			
+				-- add settings to the PKTrackerVars object
+				PKTrackerVars.Settings = settings
+				
+				-- wipe out the old settings object
+				settings = nil
+			
+			end
+		
+		end
+		
+		if not PKTrackerVars.Settings then
+			
+			PKTrackerVars.Settings = {
+				Scale = .85,
+				Sound = true,
+				KillsAggregated = true					
+			}
+			
+		end			
+				
+	end
+	
+	if PKTrackerVars.Settings.Sound == nil then
+		PKTrackerVars.Settings.Sound = true;
+	end
+	
+	if not PKTrackerVars.Settings.KillsAggregated then
+		AggregateKills()
+	end	
+
+end
+
+
 events.ADDON_LOADED = function(...)	
 
 	if select(1, ...) == "PKTracker" then	
 		
 		frame:UnregisterEvent("ADDON_LOADED");							
 
-		if history == nil then
-			history = {};			
-		end  	
+		AddChatMessage(string.format(" version %s loaded.", version))
 		
-		if info == nil then
-			info = {};		
-		end
-		
-		if settings == nil then
-			settings = {
-				Scale = .85				
-			};
-		end
-		
-		if settings.Sound == nil then
-			settings.Sound = true;
-		end
+		InitializeSavedVariables()
 		
 		WipeInfo();
-		currentRecord = getn(history);			
+		currentRecord = #PKTrackerVars.History;			
 		CreateKillFrames();
 		
-		if settings.Hide then
+		if PKTrackerVars.Settings.Hide then
 			frame:Hide();					
-		end
-		
-		AddChatMessage(string.format(" version %s loaded.", version))
+		end			
 	
 	end
 
@@ -737,6 +895,8 @@ events.PLAYER_ENTER_COMBAT = function(...)
 end
 
 events.PLAYER_LEAVE_COMBAT = function(...)
+    
+    local history, info, settings = PKTrackerVars.History, PKTrackerVars.Info, PKTrackerVars.Settings	
     
     combat = false      
     
@@ -768,12 +928,17 @@ end
 
 events.COMBAT_LOG_EVENT_UNFILTERED = function (timestamp, event, hideCaster, sourceGUID, sourceName, sourceFlags, sourceFlags2, destGUID, destName, destFlags, destFlags2,	...)
    
-	local spellId,	
+	local history, info, settings = PKTrackerVars.History, PKTrackerVars.Info, PKTrackerVars.Settings	
+   
+	local _,
+	spellId,	
 	spellName,
 	spellSchool,
 	amount,
 	overkill,
-	environment	
+	environment,
+	critical,
+	tick;
 	
 	local combatant = combatants[destGUID]
 	
@@ -788,7 +953,7 @@ events.COMBAT_LOG_EVENT_UNFILTERED = function (timestamp, event, hideCaster, sou
 	if event == "UNIT_DIED" and combatant and combatant.Dead then			
 			
 		if settings.debugging then
-			AddDebugChatMessage(string.format("event: %s, AttackerGUID:%s, AttackerName: %s, SpellID: %s", nvl(event,"nil"), nvl(combatant.AttackerGUID, "nil"), nvl(combatant.AttackerName,"nil"), nvl(combatant.SpellID,"nil")))		
+			AddDebugChatMessage(string.format("event: %s, AttackerGUID:%s, AttackerName: %s, SpellID: %s", tostring(event), tostring(combatant.AttackerGUID), tostring(combatant.AttackerName), tostring(combatant.SpellID)))		
 		end
 						
 		local x, y = GetPlayerMapPosition("player");
@@ -800,10 +965,19 @@ events.COMBAT_LOG_EVENT_UNFILTERED = function (timestamp, event, hideCaster, sou
 			targetInfo = {
 				GUID = destGUID,
 				Name = destName,
+				Kills = 1,
 				Time = time()
 			}
 			
-			info[destGUID] = targetInfo
+			info[destGUID] = targetInfo		
+			
+		elseif targetInfo.Kills then
+		
+			targetInfo.Kills = targetInfo.Kills + 1
+			
+		else
+			
+			targetInfo.Kills = 1
 		
 		end				
 		
@@ -828,9 +1002,12 @@ events.COMBAT_LOG_EVENT_UNFILTERED = function (timestamp, event, hideCaster, sou
 				Y = y * 100
 			},
 			AttackerGUID = combatant.AttackerGUID,
-			SpellID = combatant.SpellID			
+			SpellID = combatant.SpellID,
+			Damage = combatant.Damage,
+			Tick = combatant.Tick,
+			Crit = combatant.Crit,
 		};							
-				
+						
 		targetInfo.Keep = true		
 		table.insert(history, kill);		
 		UpdateKillFrames(#history, true);	
@@ -845,7 +1022,7 @@ events.COMBAT_LOG_EVENT_UNFILTERED = function (timestamp, event, hideCaster, sou
 	elseif event == "PARTY_KILL" and isHostilePlayer then			
 		
 		if settings.debugging then
-			AddDebugChatMessage(string.format("event: %s, sourceName: %s, destName: %s", nvl(event,"nil"), nvl(sourceName,"nil"), nvl(destName,"nil")))
+			AddDebugChatMessage(string.format("event: %s, sourceName: %s, destName: %s", tostring(event), tostring(sourceName), tostring(destName)))
 		end
 		
 		if not combatant then
@@ -865,20 +1042,26 @@ events.COMBAT_LOG_EVENT_UNFILTERED = function (timestamp, event, hideCaster, sou
 	elseif damageEvents[event] and isHostilePlayer then
 	
 		if event == "SWING_DAMAGE" then
-			amount, overkill = ...			
+			amount, overkill, _, _, _, _, critical = ...	
 			spellId = -1			
 			spellName = "melee attack"
 		elseif event == "ENVIRONMENTAL_DAMAGE" then
-			environment, amount, overkill = ...
+			environment, amount, overkill, _, _, _, _, critical = ...
 			spellId = damageTypeMapping[environment]			
 		else 
-			spellId, spellName, spellSchool, amount, overkill = ...
+			spellId, spellName, spellSchool, amount, overkill, _, _, _, _, critical = ...
 		end
+		
+		if event == "SPELL_PERIODIC_DAMAGE" then
+			tick = true
+		end
+		
+		critical = nilIf(critical, false)
 	
 		if (combatant or sourceGUID == playerGUID or teammates[sourceGUID]) then
 								
 			if settings.debugging then
-				AddDebugChatMessage(string.format("event: %s, sourceName: %s, spellId: %s, spellName: %s, overkill: %s", nvl(event,"nil"), nvl(sourceName,"nil"), nvl(spellId,"nil"), nvl(spellName, "nil"), nvl(overkill,"nil")))
+				AddDebugChatMessage(string.format("event: %s, sourceName: %s, spellId: %s, spellName: %s, overkill: %s, tick: %s, crit: %s", tostring(event), tostring(sourceName), tostring(spellId), tostring(spellName), nvl(overkill), tostring(tick), tostring(critical)))
 			end
 				
 			-- overkill killing blow				
@@ -891,8 +1074,11 @@ events.COMBAT_LOG_EVENT_UNFILTERED = function (timestamp, event, hideCaster, sou
 				combatant = combatants[destGUID]		
 						
 			end
-			
-			combatant.Dead = combatant.Dead or (overkill and overkill > 0)
+						
+			combatant.Dead = overkill and overkill > 0
+			combatant.Damage = amount
+			combatant.Tick = tick
+			combatant.Crit = critical			
 			combatant.AttackerGUID = sourceGUID
 			combatant.AttackerName = sourceName					
 			combatant.SpellID = spellId	
@@ -900,17 +1086,20 @@ events.COMBAT_LOG_EVENT_UNFILTERED = function (timestamp, event, hideCaster, sou
 		elseif not combatant and (sourceGUID == playerGUID or teammates[sourceGUID]) then
 		
 			if settings.debugging then
-				AddDebugChatMessage(string.format("event: %s, sourceName: %s, spellId: %s, spellName: %s, overkill: %s", nvl(event,"nil"), nvl(sourceName,"nil"), nvl(spellId,"nil"), nvl(spellName, "nil"), nvl(overkill,"nil")))
+				AddDebugChatMessage(string.format("event: %s, sourceName: %s, spellId: %s, spellName: %s, overkill: %s, tick: %s, crit: %s", tostring(event), tostring(sourceName), tostring(spellId), tostring(spellName), tostring(overkill), tostring(tick), tostring(critical)))
 			end
 		
 			-- Add unit GUID to combatants
 			combatants[destGUID] = {
-				GUID = destGUID,
-				Dead = overkill and overkill > 0,
+				GUID = destGUID,						
 				AttackerGUID = sourceGUID,
 				AttackerName = sourceName,					
-				SpellID = spellId					
-			}
+				SpellID = spellId,
+				Dead = overkill and overkill > 0,
+				Damage = amount,
+				Tick = tick,
+				Crit = critical,
+			}						
 		
 		end
 		
@@ -919,12 +1108,12 @@ events.COMBAT_LOG_EVENT_UNFILTERED = function (timestamp, event, hideCaster, sou
 		spellId, spellName, spellSchool = ...			
 			
 		if settings.debugging then
-			AddDebugChatMessage(string.format("event: SPELL_AURA_APPLIED, spellId: %s, spellName: %s, destName: %s", nvl(spellId,"nil"), nvl(spellName,"nil"), nvl(destName,"nil")))
+			AddDebugChatMessage(string.format("event: SPELL_AURA_APPLIED, spellId: %s, spellName: %s, destName: %s", tostring(spellId), tostring(spellName), tostring(destName)))
 		end							
 					
 		-- priest Spirit of Redemption			
 		if spellId == 27827 then			
-			combatant.Dead = true			
+			combatant.Dead = true						
 			events.COMBAT_LOG_EVENT_UNFILTERED(timestamp, "UNIT_DIED", hideCaster, sourceGUID, sourceName, sourceFlags, sourceFlags2, destGUID, destName, destFlags, destFlags2)						
 		end		
 	
@@ -935,11 +1124,14 @@ events.COMBAT_LOG_EVENT_UNFILTERED = function (timestamp, event, hideCaster, sou
 		-- stupid purgatory...		
 						
 		if settings.debugging then
-			AddDebugChatMessage(string.format("event: %s, sourceName: %s, spellId: %s, spellName: %s", nvl(event,"nil"), nvl(sourceName,"nil"), nvl(spellId,"nil"), nvl(spellName, "nil")))
+			AddDebugChatMessage(string.format("event: %s, sourceName: %s, spellId: %s, spellName: %s", tostring(event), tostring(sourceName), tostring(spellId), tostring(spellName)))
 		end
 		
 		-- Allow UNIT_DIED to pick up the kill if it wasn't a PARTY_KILL			
 		combatant.Dead = true
+		combatant.Damage = nil
+		combatant.Tick = nil
+		combatant.Crit = nil			
 		combatant.AttackerGUID = sourceGUID
 		combatant.AttackerName = sourceName					
 		combatant.SpellID = spellId										
@@ -962,10 +1154,67 @@ events.UNIT_NAME_UPDATE = function(unitId)
 	end
 end
 
-local function OnZoneSwapped()
-	local pvpType, isFFA, faction = GetZonePVPInfo();
+events.OnTooltipCleared = function(self)
+	tooltipSet = false
+end
 
+events.OnTooltipSetUnit = function(self)
+	if tooltipSet then return end
+	
+	local history, info, settings = PKTrackerVars.History, PKTrackerVars.Info, PKTrackerVars.Settings	
+	
+	tooltipSet = true	
+	
+	local name, unit = GameTooltip:GetUnit()
+	
+	if not UnitExists(unit) or not UnitIsEnemy("player", unit) then return end
+	
+	local guid = UnitGUID(unit)
+	
+	if guid and guid:match("Player--") then
+		
+		local unitInfo = info[guid]
+		
+		if not unitInfo then 
+		
+			GameTooltip:AddLine("Killed 0 times.")										
+		
+		elseif unitInfo.Kills == 1 then
+		
+			GameTooltip:AddLine("Killed 1 time.")										
+		
+		else		
+		
+			GameTooltip:AddLine(string.format("Killed %d times.", unitInfo.Kills))			
+		
+		end		
+		
+	end	
+end
+
+local function InUntrackedArea()
+	local pvpType, isFFA, faction = GetZonePVPInfo();
+		
 	if pvpType == "combat" or IsInInstance() then
+		return true
+	end
+	
+	local zone, subZone = GetZoneText("player"), GetMinimapZoneText()
+	
+	-- The PvP area of Ashran apparently likes to sometimes report as "contested" rather than "combat"...
+	if zone == "Ashran" and not (subZone == "Stormshield" or subZone == "Warspear") then
+		return true
+	end
+	
+	return false
+
+end
+
+local function OnZoneSwapped()
+
+	local history, info, settings = PKTrackerVars.History, PKTrackerVars.Info, PKTrackerVars.Settings	
+
+	if InUntrackedArea() then
 		if tracking then				
 			AddChatMessage("has paused tracking.")			
 		end
@@ -973,8 +1222,12 @@ local function OnZoneSwapped()
 		frame:Hide()
 		frame:UnregisterEvent("COMBAT_LOG_EVENT_UNFILTERED");
 		frame:UnregisterEvent("UNIT_TARGET");
+		frame:UnregisterEvent("UNIT_NAME_UPDATE");		
+		frame:UnregisterEvent("GROUP_ROSTER_UPDATE");				
 		frame:UnregisterEvent("PLAYER_ENTER_COMBAT");
-		frame:UnregisterEvent("PLAYER_LEAVE_COMBAT");		
+		frame:UnregisterEvent("PLAYER_LEAVE_COMBAT");	
+		-- GameTooltip:SetScript("OnTooltipCleared", nil)
+		-- GameTooltip:SetScript("OnTooltipSetUnit", nil)			
 	else		
 		if not tracking then
 			AddChatMessage("has resumed tracking.")
@@ -985,8 +1238,13 @@ local function OnZoneSwapped()
 		end
 		frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED");
 		frame:RegisterEvent("UNIT_TARGET");
+		frame:RegisterEvent("UNIT_NAME_UPDATE");		
+		frame:RegisterEvent("GROUP_ROSTER_UPDATE");		
 		frame:RegisterEvent("PLAYER_ENTER_COMBAT");
-		frame:RegisterEvent("PLAYER_LEAVE_COMBAT");		
+		frame:RegisterEvent("PLAYER_LEAVE_COMBAT");			
+		-- GameTooltip:SetScript("OnTooltipCleared", events.OnTooltipCleared)
+		-- GameTooltip:SetScript("OnTooltipSetUnit", events.OnTooltipSetUnit)		
+		-- tooltipSet = false
 	end
 end
 
@@ -1010,6 +1268,8 @@ events.custom.UNIT_UPDATE = function (unitGUID,	name, realm, class, level, race,
 		return
 	
 	end
+	
+	local history, info, settings = PKTrackerVars.History, PKTrackerVars.Info, PKTrackerVars.Settings	
 	
 	infoRequests[unitGUID] = nil
 
@@ -1067,6 +1327,8 @@ events.custom.UNIT_INFO_REQUEST = function (GUID, requestor)
 		return
 	
 	end		
+
+	local info = PKTrackerVars.Info
 	
 	local unitInfo = info[GUID];
 		
@@ -1078,7 +1340,7 @@ events.custom.UNIT_INFO_REQUEST = function (GUID, requestor)
 	
 end
 
-events.CHAT_MSG_ADDON = function(prefix, message, type, sender)		
+events.CHAT_MSG_ADDON = function(prefix, message, type, sender)			
 	
 	if prefix ~= "PKTRACKER" then
 		return
@@ -1094,7 +1356,7 @@ events.CHAT_MSG_ADDON = function(prefix, message, type, sender)
 	
 end
 
-events.GROUP_ROSTER_UPDATE = function(...)
+events.GROUP_ROSTER_UPDATE = function(...)     
    
    local n, prefix, guid
    
@@ -1119,16 +1381,27 @@ events.GROUP_ROSTER_UPDATE = function(...)
 		guid = UnitGUID(string.format("%s%d", prefix, i))
 		
 		if guid then	
-		
+			
+			-- add players
 			teammates[guid] = true
 			
-			guid = UnitGUID(string.format("%spet%d", prefix, i))
+			guid = UnitGUID(string.format("%s%dpet", prefix, i))
 			
 			if guid then
 			
+				-- add pets
 				teammates[guid] = true			
 				
 			end	
+						
+			guid = UnitGUID(string.format("%s%dvehicle", prefix, i))
+			
+			if guid then
+			
+				-- add vehicles?
+				teammates[guid] = true			
+				
+			end				
 							
 		end 
 		  
@@ -1139,21 +1412,18 @@ end
 RegisterAddonMessagePrefix("PKTRACKER");
 frame:RegisterEvent("ADDON_LOADED");
 frame:RegisterEvent("CHAT_MSG_ADDON");
-frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED");
 frame:RegisterEvent("PLAYER_ENTERING_WORLD");
-frame:RegisterEvent("PLAYER_LEAVE_COMBAT");
-frame:RegisterEvent("PLAYER_ENTER_COMBAT");
-frame:RegisterEvent("UNIT_NAME_UPDATE");
-frame:RegisterEvent("UNIT_TARGET");
 frame:RegisterEvent("ZONE_CHANGED_NEW_AREA");
-frame:RegisterEvent("GROUP_ROSTER_UPDATE");
 
 frame:SetScript("OnEvent", function(self, event, ...)
- events[event](...);
+	events[event](...);
 end);
 
 SLASH_PKTtracker1,SLASH_PKTtracker2 = "/pkt", "/pktracker";
 SlashCmdList.PKTtracker = function(msg, editbox)
+
+	local history, info, settings = PKTrackerVars.History, PKTrackerVars.Info, PKTrackerVars.Settings	
+
 	if msg == "hide" then
 		settings.Hide = true;
 		frame:Hide();
