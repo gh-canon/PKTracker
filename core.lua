@@ -1,7 +1,7 @@
 ﻿-- Author      : canon
 -- Create Date : 7/25/2013 9:51:02 PM
 
-local version = "0.0.0.41"
+local version = "0.0.0.42"
 local frame = CreateFrame("BUTTON", "PKTracker");
 local events = {};
 local genders = { "unknown", "Male", "Female" };
@@ -166,10 +166,6 @@ local function Split(val, pattern)
 		table.insert(values, text)
 	end	
 	return values;
-end
-
-local function roundToFirstDecimal(t)
-    return math.round(t*10)*0.1
 end
 
 local function AddDebugChatMessage(text)
@@ -350,9 +346,11 @@ local function UpdateKillFrame(killFrame, kill, n)
 	local damageString = ""
 	
 	if kill.Damage then
-		if kill.Damage > 1000 then
-			damageString = string.format("%gk", roundToFirstDecimal(kill.Damage / 1000))
-		elseif kill.Damage < 1000 then
+		if kill.Damage >= 1000000 then
+			damageString = string.format("%.1fk", math.round(kill.Damage / 1000000))
+		elseif kill.Damage >= 1000 then
+			damageString = string.format("%dk", math.round(kill.Damage / 1000))
+		else
 			damageString = tostring(kill.Damage)
 		end
 	end
