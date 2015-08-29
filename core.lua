@@ -1,7 +1,7 @@
 ﻿-- Author      : canon
 -- Create Date : 7/25/2013 9:51:02 PM
 
-local version = "0.0.0.42"
+local version = "0.0.0.45"
 local frame = CreateFrame("BUTTON", "PKTracker");
 local events = {};
 local genders = { "unknown", "Male", "Female" };
@@ -166,6 +166,12 @@ local function Split(val, pattern)
 		table.insert(values, text)
 	end	
 	return values;
+end
+
+local function SameDay(date1, date2)
+
+	return date1.year == date2.year and date1.month == date2.month and date1.day == date2.day
+
 end
 
 local function AddDebugChatMessage(text)
@@ -347,7 +353,7 @@ local function UpdateKillFrame(killFrame, kill, n)
 	
 	if kill.Damage then
 		if kill.Damage >= 1000000 then
-			damageString = string.format("%.1fk", math.round(kill.Damage / 1000000))
+			damageString = string.format("%.1fm", math.round(kill.Damage / 1000000))
 		elseif kill.Damage >= 1000 then
 			damageString = string.format("%dk", math.round(kill.Damage / 1000))
 		else
@@ -365,7 +371,7 @@ local function UpdateKillFrame(killFrame, kill, n)
 			spellName = 'crit ' .. spellName
 		end
 	
-		if kill.SpellID < -1 then
+		if kill.SpellID < -1 or kill.SpellID == 188520 then -- environmental or Fel Sludge
 		
 			killFrame.KilledBy:SetText(string.format("Died from %s", spellName))		
 	
@@ -381,9 +387,9 @@ local function UpdateKillFrame(killFrame, kill, n)
 		
 			if kill.AttackerGUID == kill.GUID then
 			
-				killFrame.KilledBy:SetText(string.format("Died to %s own %s", iif(kill.Sex == 3, "her", "his"), spellName))				
+				killFrame.KilledBy:SetText(string.format("Died to %s own %s", iif(unitInfo and unitInfo.Sex == 3, "her", "his"), spellName))				
 			
-			elseif info[kill.AttackerGUID] then
+			elseif info[kill.AttackerGUID] then							
 			
 				if kill.Damage then
 					killFrame.KilledBy:SetText(string.format("Died to %s's %s %s", info[kill.AttackerGUID].Name:gmatch("[^-]+")(), damageString, spellName))									
@@ -399,7 +405,7 @@ local function UpdateKillFrame(killFrame, kill, n)
 						
 		else			
 	
-			killFrame.KilledBy:SetText("Died to Unkown (assist)")
+			killFrame.KilledBy:SetText("Died to Unknown (assist)")
 		end
 	
 	else
@@ -426,7 +432,7 @@ local function UpdateKillFrame(killFrame, kill, n)
 						
 		else			
 	
-			killFrame.KilledBy:SetText("Died to Unkown (assist)")
+			killFrame.KilledBy:SetText("Died to Unknown (assist)")
 			
 		end	
 	
@@ -1427,12 +1433,35 @@ SlashCmdList.PKTtracker = function(msg, editbox)
 		frame:Hide();
 	elseif msg == "info" then
 		local maxLevelKills = 0
+		local killsToday = 0
+		local maxLevelKillsToday = 0
+		local today = date("*t", time())
+		local killedToday
+		
+		
 		for i = 1, #history do
+			
+			killedToday = SameDay(today, date("*t", history[i].Time))
+		
 			if history[i].Level == 100 then
 				maxLevelKills = maxLevelKills + 1
+				
+				if killedToday then
+				
+					maxLevelKillsToday = maxLevelKillsToday + 1
+				
+				end			
+				
 			end
+			
+			if killedToday then
+			
+				killsToday = killsToday + 1
+			
+			end
+			
 		end	
-		AddChatMessage(string.format("%d total kills; %d level 100s", #history, maxLevelKills));
+		AddChatMessage(string.format("%d total kills; %d level 100s. %d kills today; %d level 100s.", #history, maxLevelKills, killsToday, maxLevelKillsToday));
 	elseif msg == "resetdata" then		
 		for key in pairs(history) do			
 			history[key] = nil;			

@@ -2,5 +2,5 @@
 ## Interface: 60000
 ## SavedVariablesPerCharacter: PKTrackerVars, history, info, settings
 ## Title: PKTracker
-## Version: 0.0.0.42
+## Version: 0.0.0.45
 core.lua
