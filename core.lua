@@ -1,7 +1,7 @@
 ﻿-- Author      : canon
 -- Create Date : 7/25/2013 9:51:02 PM
 
-local version = "0.0.0.45"
+local version = "0.0.0.46"
 local frame = CreateFrame("BUTTON", "PKTracker");
 local events = {};
 local genders = { "unknown", "Male", "Female" };
