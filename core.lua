@@ -1,7 +1,7 @@
 ﻿-- Author      : canon
 -- Create Date : 7/25/2013 9:51:02 PM
 
-local version = "0.0.0.46"
+local version = "0.0.0.47"
 local frame = CreateFrame("BUTTON", "PKTracker");
 local events = {};
 local genders = { "unknown", "Male", "Female" };
@@ -284,11 +284,13 @@ local function UpdateKillFrame(killFrame, kill, n)
 		
 	local name = nvl(unitInfo.Name, "Unknown");
 	
+	killFrame.UnitGUID = kill.GUID;
+	
 	if name == "Unknown" or not unitInfo.Class or not unitInfo.Level or not unitInfo.Sex or not unitInfo.Race then
 		
 		SendUnitInfoRequest(kill.GUID)
 	
-	end	
+	end		
 	
 	if unitInfo.Realm and not name:find("-") then
 		name = string.format("%s-%s", name, unitInfo.Realm)
@@ -313,7 +315,10 @@ local function UpdateKillFrame(killFrame, kill, n)
 		killFrame.PlayerLevel:Show();
 		killFrame.PlayerLevel:SetAlpha(1)
 		
-		killFrame.texture:SetTexture(unpack(classFrameColors[unitInfo.Class]));
+		local red, green, blue, alpha = unpack(classFrameColors[unitInfo.Class]);
+		
+		killFrame.texture:SetColorTexture(red, green, blue, alpha);		
+
 		
 	else -- no extended info
 	
@@ -327,9 +332,9 @@ local function UpdateKillFrame(killFrame, kill, n)
 						
 		killFrame.ClassIcon:SetTexture([[Interface\Icons\INV_Misc_QuestionMark]]);
 		killFrame.ClassIcon:SetTexCoord(0,1,0,1);			
-		
-		killFrame.texture:SetTexture(0,0,0,.5);
-		
+				
+		killFrame.texture:SetColorTexture(0,0,0,.5);
+			
 	end		
 	
 	killFrame.KillTime:SetText(date("%m/%d/%y %I:%M%p", kill.Time));
@@ -444,20 +449,24 @@ end
 
 local function CreateKillFrame(i)	
 		
-	local killFrame = CreateFrame("FRAME", nil, frame);
+	local killFrame = CreateFrame("BUTTON", nil, frame);
 	frame["KILLFRAME" .. i] = killFrame;
 	killFrame:SetWidth(210);	
 	killFrame:SetHeight(47); --37	
 
-	local bg = killFrame:CreateTexture(nil, "BACKGROUND");
-	bg:SetTexture(0,0,0,.5);
-	bg:SetAllPoints(killFrame);
-	killFrame.texture = bg;
+	killFrame.texture = killFrame:CreateTexture(nil, "BACKGROUND");
+	killFrame.texture:SetColorTexture(0,0,0,.5);
+	killFrame.texture:SetAllPoints(killFrame);
+	
+	local highlight = killFrame:CreateTexture();
+	highlight:SetColorTexture(1,1,1,.025);
+	highlight:SetAllPoints(killFrame);	
+	killFrame:SetHighlightTexture(highlight);	
 
-	killFrame.ContentFrame = CreateFrame("FRAME",nil,killFrame);	
+	killFrame.ContentFrame = CreateFrame("Frame",nil,killFrame);	
 	killFrame.ContentFrame:SetWidth(200);	
 	killFrame.ContentFrame:SetHeight(27);		
-	killFrame.ContentFrame:SetPoint("TOPLEFT", killFrame, "TOPLEFT", 5, -5);		
+	killFrame.ContentFrame:SetPoint("TOPLEFT", killFrame, "TOPLEFT", 5, -5);				
 
 	killFrame.ClassIcon = killFrame.ContentFrame:CreateTexture();
 	killFrame.ClassIcon:SetHeight(8);
@@ -507,6 +516,57 @@ local function CreateKillFrame(i)
 	
 end
 
+local function KillFrameClickHandler(self, ...)
+
+	local history, info, settings = PKTrackerVars.History, PKTrackerVars.Info, PKTrackerVars.Settings				
+	
+	local kill, unitInfo, timeSpan, timeString, nthKill;
+	
+	local now = time();	
+	
+	unitInfo = info[self.UnitGUID];
+	
+	nthKill = 1;
+	
+	AddChatMessage("---------------------");
+	
+	AddChatMessage(string.format("Killed |cFF%s%s|cFFFFFFFF in the following locations:", classColors[unitInfo.Class], nvl(unitInfo.Name, "Unknown")));	
+	
+	for i = 1, #history  do
+		
+		kill = history[i];	
+		
+		if (kill.GUID == self.UnitGUID) then			
+		
+			timeSpan = now - kill.Time;
+							
+			timeSegments = {};
+			
+			if timeSpan >= 31536000 then
+				timeString = string.format("%.1f years", timeSpan / 31536000);
+			elseif timeSpan >= 2419200 then
+				timeString = string.format("%.1f months", timeSpan / 2419200);				
+			elseif timeSpan >= 604800 then
+				timeString = string.format("%.1f weeks", timeSpan / 604800);				
+			elseif timeSpan >= 86400 then
+				timeString = string.format("%.1f days", timeSpan / 86400);				
+			elseif timeSpan >= 3600 then
+				timeString = string.format("%.1f hours", timeSpan / 3600);																
+			elseif timeSpan >= 60 then
+				timeString = string.format("%.1f minutes", timeSpan / 60);																
+			else
+				timeString = string.format("%.1f seconds", timeSpan);																								
+			end
+								
+			AddChatMessage(string.format("|cCCCCCCFF#%d: %s%s %s ago", nthKill, iif(kill.Location.Zone2 and kill.Location.Zone2 ~= kill.Location.Zone, kill.Location.Zone2 .. ", ", ""), kill.Location.Zone, timeString));
+			nthKill = nthKill + 1
+		
+		end
+	
+	end						
+
+end
+
 local function UpdateKillFrames(n, newKill)
 		
 	local history, info, settings = PKTrackerVars.History, PKTrackerVars.Info, PKTrackerVars.Settings		
@@ -549,18 +609,21 @@ local function UpdateKillFrames(n, newKill)
 		killFrame = frame["KILLFRAME" .. i];
 						
 		if n <= nHistory and n > 0 then
-		
+					
 			UpdateKillFrame(killFrame, history[n], n)			
 			killFrame.ContentFrame:Show();		
 			if newKill and n == nHistory and settings.Sound then
 				PlaySound("igAbilityIconDrop"); -- igPVPUpdate
 			end			
 			n = n + 1;
-			count = count + 1;			
+			count = count + 1;						
+			killFrame:SetScript("OnClick", KillFrameClickHandler);		
+			
 		else
 		
-			killFrame.texture:SetTexture(0,0,0,.5);
+			killFrame.texture:SetColorTexture(0,0,0,.5);			
 			killFrame.ContentFrame:Hide();
+			killFrame:SetScript("OnClick", nil);
 		
 		end		
 		
@@ -1229,9 +1292,7 @@ local function OnZoneSwapped()
 		frame:UnregisterEvent("UNIT_NAME_UPDATE");		
 		frame:UnregisterEvent("GROUP_ROSTER_UPDATE");				
 		frame:UnregisterEvent("PLAYER_ENTER_COMBAT");
-		frame:UnregisterEvent("PLAYER_LEAVE_COMBAT");	
-		-- GameTooltip:SetScript("OnTooltipCleared", nil)
-		-- GameTooltip:SetScript("OnTooltipSetUnit", nil)			
+		frame:UnregisterEvent("PLAYER_LEAVE_COMBAT");				
 	else		
 		if not tracking then
 			AddChatMessage("has resumed tracking.")
@@ -1246,9 +1307,6 @@ local function OnZoneSwapped()
 		frame:RegisterEvent("GROUP_ROSTER_UPDATE");		
 		frame:RegisterEvent("PLAYER_ENTER_COMBAT");
 		frame:RegisterEvent("PLAYER_LEAVE_COMBAT");			
-		-- GameTooltip:SetScript("OnTooltipCleared", events.OnTooltipCleared)
-		-- GameTooltip:SetScript("OnTooltipSetUnit", events.OnTooltipSetUnit)		
-		-- tooltipSet = false
 	end
 end
 
